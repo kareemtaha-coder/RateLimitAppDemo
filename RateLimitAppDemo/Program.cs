@@ -1,17 +1,27 @@
 using Microsoft.AspNetCore.RateLimiting;
+using System.Net;
 using System.Threading.RateLimiting;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddRateLimiter(rateLimiterOptions =>
 {
-    rateLimiterOptions.AddFixedWindowLimiter(policyName: "FixedPolicy", options =>
+    rateLimiterOptions.AddPolicy("FixedPolicy", context =>
     {
-        options.PermitLimit = 5;
-        options.Window = TimeSpan.FromSeconds(10);
-        //options.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        //options.QueueLimit = 2;
+        var clientIp = context.Request.Headers["X-Test-IP"].FirstOrDefault()
+                       ?? context.Connection.RemoteIpAddress?.ToString()
+                       ?? "unknown_ip";
+        Console.WriteLine(clientIp);
+
+        return RateLimitPartition.GetFixedWindowLimiter(partitionKey: clientIp, factory: _ =>
+        new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 5,
+            Window = TimeSpan.FromSeconds(10),
+          
+        });
     });
+
     rateLimiterOptions.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     rateLimiterOptions.OnRejected = async (context, token) =>
     {
@@ -26,8 +36,10 @@ builder.Services.AddRateLimiter(rateLimiterOptions =>
             Title = "Too Many Requests",
             Status = 429,
             Detail = "You have exceeded the rate limit.",
-            RetryAfterSeconds = retryAfter.TotalSeconds
-    };
+            RetryAfterSeconds = retryAfter.TotalSeconds,
+
+
+        };
             await context.HttpContext.Response.WriteAsJsonAsync(problemDetails, cancellationToken: token);
     };
 });
