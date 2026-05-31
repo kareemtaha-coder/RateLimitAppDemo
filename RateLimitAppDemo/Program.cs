@@ -9,14 +9,26 @@ builder.Services.AddRateLimiter(rateLimiterOptions =>
     {
         options.PermitLimit = 5;
         options.Window = TimeSpan.FromSeconds(10);
-        options.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        options.QueueLimit = 2;
+        //options.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        //options.QueueLimit = 2;
     });
     rateLimiterOptions.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     rateLimiterOptions.OnRejected = async (context, token) =>
     {
-        await context.HttpContext.Response.WriteAsync(
-            "Rate limit exceeded. Please try again later.", cancellationToken: token);
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+        {
+            context.HttpContext.Response.Headers.RetryAfter = ((int)retryAfter.TotalSeconds).ToString();
+        }
+        context.HttpContext.Response.ContentType = "application/json";
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        var problemDetails = new
+        {
+            Title = "Too Many Requests",
+            Status = 429,
+            Detail = "You have exceeded the rate limit.",
+            RetryAfterSeconds = retryAfter.TotalSeconds
+    };
+            await context.HttpContext.Response.WriteAsJsonAsync(problemDetails, cancellationToken: token);
     };
 });
 builder.Services.AddControllers();
